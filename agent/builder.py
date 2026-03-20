@@ -33,10 +33,19 @@ _OLLAMA_RE = re.compile(
     r"neural-chat|dolphin|wizardlm|orca|nous-hermes|command-r|qwen(?!-3))",
     re.IGNORECASE,
 )
+_KILO_RE = re.compile(r"^kilo-", re.IGNORECASE)
+_OPENCODEGO_RE = re.compile(r"^opencode-go/", re.IGNORECASE)
+_ZAI_RE = re.compile(r"^glm-", re.IGNORECASE)
 
 
 def infer_provider_for_model(model: str) -> str | None:
     """Return the likely provider for *model*, or ``None`` if ambiguous."""
+    if _OPENCODEGO_RE.search(model):
+        return "opencode-go"
+    if _KILO_RE.search(model):
+        return "kilo"
+    if _ZAI_RE.search(model):
+        return "zai"
     if "/" in model:
         return "openrouter"
     if _ANTHROPIC_RE.search(model):
@@ -83,6 +92,18 @@ def _fetch_models_for_provider(cfg: AgentConfig, provider: str) -> list[dict]:
         return list_openai_models(api_key=cfg.cerebras_api_key, base_url=cfg.cerebras_base_url)
     if provider == "ollama":
         return list_ollama_models(base_url=cfg.ollama_base_url)
+    if provider == "kilo":
+        if not cfg.kilo_api_key:
+            raise ModelError("Kilo key not configured.")
+        return list_openai_models(api_key=cfg.kilo_api_key, base_url=cfg.kilo_base_url)
+    if provider == "zai":
+        if not cfg.zai_api_key:
+            raise ModelError("Z.ai key not configured.")
+        return list_openai_models(api_key=cfg.zai_api_key, base_url=cfg.zai_base_url)
+    if provider == "opencode-go":
+        if not cfg.opencodego_api_key:
+            raise ModelError("OpenCode Go key not configured.")
+        return list_openai_models(api_key=cfg.opencodego_api_key, base_url=cfg.opencodego_base_url)
     raise ModelError(f"Unknown provider: {provider}")
 
 
@@ -147,9 +168,30 @@ def build_model_factory(cfg: AgentConfig) -> ModelFactory | None:
                 first_byte_timeout=120,
                 strict_tools=False,
             )
+        if provider == "kilo" and cfg.kilo_api_key:
+            return OpenAICompatibleModel(
+                model=model_name,
+                api_key=cfg.kilo_api_key,
+                base_url=cfg.kilo_base_url,
+                reasoning_effort=effort,
+            )
+        if provider == "zai" and cfg.zai_api_key:
+            return OpenAICompatibleModel(
+                model=model_name,
+                api_key=cfg.zai_api_key,
+                base_url=cfg.zai_base_url,
+                reasoning_effort=effort,
+            )
+        if provider == "opencode-go" and cfg.opencodego_api_key:
+            return OpenAICompatibleModel(
+                model=model_name,
+                api_key=cfg.opencodego_api_key,
+                base_url=cfg.opencodego_base_url,
+                reasoning_effort=effort,
+            )
         raise ModelError(f"No API key available for model '{model_name}' (provider={provider})")
 
-    if cfg.anthropic_api_key or cfg.openai_api_key or cfg.openrouter_api_key or cfg.cerebras_api_key or cfg.ollama_base_url:
+    if cfg.anthropic_api_key or cfg.openai_api_key or cfg.openrouter_api_key or cfg.cerebras_api_key or cfg.ollama_base_url or cfg.kilo_api_key or cfg.zai_api_key or cfg.opencodego_api_key:
         return _factory
     return None
 
@@ -208,6 +250,27 @@ def build_engine(cfg: AgentConfig) -> RLMEngine:
             reasoning_effort=cfg.reasoning_effort,
             first_byte_timeout=120,
             strict_tools=False,
+        )
+    elif cfg.provider == "kilo" and cfg.kilo_api_key:
+        model = OpenAICompatibleModel(
+            model=model_name,
+            api_key=cfg.kilo_api_key,
+            base_url=cfg.kilo_base_url,
+            reasoning_effort=cfg.reasoning_effort,
+        )
+    elif cfg.provider == "zai" and cfg.zai_api_key:
+        model = OpenAICompatibleModel(
+            model=model_name,
+            api_key=cfg.zai_api_key,
+            base_url=cfg.zai_base_url,
+            reasoning_effort=cfg.reasoning_effort,
+        )
+    elif cfg.provider == "opencode-go" and cfg.opencodego_api_key:
+        model = OpenAICompatibleModel(
+            model=model_name,
+            api_key=cfg.opencodego_api_key,
+            base_url=cfg.opencodego_base_url,
+            reasoning_effort=cfg.reasoning_effort,
         )
     elif cfg.provider == "anthropic" and cfg.anthropic_api_key:
         model = AnthropicModel(

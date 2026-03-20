@@ -24,10 +24,25 @@ export const MODEL_ALIASES: Record<string, string> = {
   deepseek: "deepseek",
   qwen: "qwen-3-235b-a22b-instruct-2507",
   "qwen-3": "qwen-3-235b-a22b-instruct-2507",
+  // z.ai
+  "glm-5": "glm-5",
+  "glm-4.7": "glm-4.7",
+  "glm-4.5": "glm-4.5",
+  // kilo
+  "kilo-frontier": "kilo-auto/frontier",
+  "kilo-balanced": "kilo-auto/balanced",
+  "kilo-fast": "kilo-auto/fast",
+  // opencode-go
+  "oc-glm": "opencode-go/glm-5",
+  "oc-kimi": "opencode-go/kimi-k2.5",
+  "oc-minimax": "opencode-go/minimax-m2.5",
 };
 
 /** Infer provider from a model name, matching builder.rs patterns. */
 export function inferProvider(model: string): string | null {
+  if (/^opencode-go\//i.test(model)) return "opencode-go";
+  if (/^kilo-/i.test(model)) return "kilo";
+  if (/^glm-/i.test(model)) return "zai";
   if (model.includes("/")) return "openrouter";
   if (/^claude/i.test(model)) return "anthropic";
   if (/^(llama.*cerebras|qwen-3|gpt-oss|zai-glm)/i.test(model)) return "cerebras";

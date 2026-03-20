@@ -38,8 +38,29 @@ static OLLAMA_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+// Kilo prefix regex — disambiguates kilo.ai models from openrouter slash models.
+static KILO_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^kilo-").unwrap());
+
+// OpenCode Go prefix regex — must be checked before slash inference.
+static OPENCODEGO_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^opencode-go/").unwrap());
+
+// Z.ai GLM prefix regex — must be checked before slash inference.
+static ZAI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^glm-").unwrap());
+
 /// Infer the likely provider for a model name, or `None` if ambiguous.
 pub fn infer_provider_for_model(model: &str) -> Option<&'static str> {
+    if OPENCODEGO_RE.is_match(model) {
+        return Some("opencode-go");
+    }
+    if KILO_RE.is_match(model) {
+        return Some("kilo");
+    }
+    if ZAI_RE.is_match(model) {
+        return Some("zai");
+    }
     if model.contains('/') {
         return Some("openrouter");
     }
@@ -117,6 +138,9 @@ pub fn resolve_provider(cfg: &AgentConfig) -> Result<String, ModelError> {
         ("openai", &cfg.openai_api_key),
         ("openrouter", &cfg.openrouter_api_key),
         ("cerebras", &cfg.cerebras_api_key),
+        ("kilo", &cfg.kilo_api_key),
+        ("zai", &cfg.zai_api_key),
+        ("opencode-go", &cfg.opencodego_api_key),
         ("ollama", &None), // ollama is always last — no key needed
     ];
 
@@ -193,6 +217,45 @@ pub fn resolve_endpoint(
         "ollama" => {
             // Ollama doesn't need a real key — use a dummy
             Ok((cfg.ollama_base_url.clone(), "ollama".to_string()))
+        }
+        "kilo" => {
+            let key = cfg
+                .kilo_api_key
+                .as_deref()
+                .or(cfg.api_key.as_deref())
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    ModelError::Message(
+                        "No Kilo API key. Set KILO_API_KEY or OPENPLANTER_KILO_API_KEY.".into(),
+                    )
+                })?;
+            Ok((cfg.kilo_base_url.clone(), key.to_string()))
+        }
+        "zai" => {
+            let key = cfg
+                .zai_api_key
+                .as_deref()
+                .or(cfg.api_key.as_deref())
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    ModelError::Message(
+                        "No Z.ai API key. Set ZAI_API_KEY or OPENPLANTER_ZAI_API_KEY.".into(),
+                    )
+                })?;
+            Ok((cfg.zai_base_url.clone(), key.to_string()))
+        }
+        "opencode-go" => {
+            let key = cfg
+                .opencodego_api_key
+                .as_deref()
+                .or(cfg.api_key.as_deref())
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    ModelError::Message(
+                        "No OpenCode Go API key. Set OPENCODEGO_API_KEY or OPENPLANTER_OPENCODEGO_API_KEY.".into(),
+                    )
+                })?;
+            Ok((cfg.opencodego_base_url.clone(), key.to_string()))
         }
         _ => Err(ModelError::Message(format!("Unknown provider: {provider}"))),
     }

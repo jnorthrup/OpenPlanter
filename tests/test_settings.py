@@ -190,6 +190,25 @@ class InferProviderTests(unittest.TestCase):
         """qwen-3 models go to Cerebras, not Ollama."""
         self.assertEqual(infer_provider_for_model("qwen-3-235b-a22b-instruct-2507"), "cerebras")
 
+    def test_kilo_models(self) -> None:
+        self.assertEqual(infer_provider_for_model("kilo-auto/frontier"), "kilo")
+        self.assertEqual(infer_provider_for_model("kilo-auto/balanced"), "kilo")
+        self.assertEqual(infer_provider_for_model("kilo-auto/fast"), "kilo")
+
+    def test_zai_models(self) -> None:
+        self.assertEqual(infer_provider_for_model("glm-5"), "zai")
+        self.assertEqual(infer_provider_for_model("glm-4.7"), "zai")
+        self.assertEqual(infer_provider_for_model("glm-4.5-air"), "zai")
+
+    def test_opencode_go_models(self) -> None:
+        self.assertEqual(infer_provider_for_model("opencode-go/glm-5"), "opencode-go")
+        self.assertEqual(infer_provider_for_model("opencode-go/kimi-k2.5"), "opencode-go")
+        self.assertEqual(infer_provider_for_model("opencode-go/minimax-m2.5"), "opencode-go")
+
+    def test_opencode_go_not_openrouter(self) -> None:
+        """opencode-go/ prefix should be opencode-go, not openrouter."""
+        self.assertNotEqual(infer_provider_for_model("opencode-go/glm-5"), "openrouter")
+
     def test_unknown_returns_none(self) -> None:
         self.assertIsNone(infer_provider_for_model("my-custom-model"))
         self.assertIsNone(infer_provider_for_model("some-random-model"))
@@ -200,6 +219,9 @@ class ValidateModelProviderTests(unittest.TestCase):
         _validate_model_provider("gpt-5.2", "openai")
         _validate_model_provider("claude-opus-4-6", "anthropic")
         _validate_model_provider("anthropic/claude-sonnet-4-5", "openrouter")
+        _validate_model_provider("kilo-auto/balanced", "kilo")
+        _validate_model_provider("glm-5", "zai")
+        _validate_model_provider("opencode-go/glm-5", "opencode-go")
 
     def test_mismatch_raises(self) -> None:
         with self.assertRaises(ModelError):

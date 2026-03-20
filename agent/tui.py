@@ -220,7 +220,7 @@ def handle_model_command(args: str, ctx: ChatContext) -> list[str]:
         list_target = parts[1] if len(parts) > 1 else None
         if list_target == "all":
             providers = _available_providers(ctx.cfg)
-        elif list_target in {"openai", "anthropic", "openrouter", "cerebras", "ollama"}:
+        elif list_target in {"openai", "anthropic", "openrouter", "cerebras", "ollama", "kilo", "zai", "opencode-go"}:
             providers = [list_target]
         else:
             providers = [ctx.cfg.provider]

@@ -33,7 +33,25 @@ class CredentialTests(unittest.TestCase):
             self.assertEqual(creds.openrouter_api_key, "or-key")
             self.assertEqual(creds.exa_api_key, "exa-key")
 
-    def test_store_roundtrip(self) -> None:
+    def test_parse_env_file_extracts_new_provider_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "KILO_API_KEY=kilo-key",
+                        "ZAI_API_KEY=zai-key",
+                        "OPENCODEGO_API_KEY=ocgo-key",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            creds = parse_env_file(env_path)
+            self.assertEqual(creds.kilo_api_key, "kilo-key")
+            self.assertEqual(creds.zai_api_key, "zai-key")
+            self.assertEqual(creds.opencodego_api_key, "ocgo-key")
+
+    def test_store_roundtrip_with_new_providers(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             store = CredentialStore(workspace=root, session_root_dir=".openplanter")
@@ -41,6 +59,9 @@ class CredentialTests(unittest.TestCase):
                 openai_api_key="oa",
                 anthropic_api_key="an",
                 openrouter_api_key="or",
+                kilo_api_key="kilo",
+                zai_api_key="zai",
+                opencodego_api_key="ocgo",
                 exa_api_key="exa",
             )
             store.save(creds)

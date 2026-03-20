@@ -14,6 +14,9 @@ pub static PROVIDER_DEFAULT_MODELS: LazyLock<HashMap<&'static str, &'static str>
             ("openrouter", "anthropic/claude-sonnet-4-5"),
             ("cerebras", "qwen-3-235b-a22b-instruct-2507"),
             ("ollama", "llama3.2"),
+            ("kilo", "anthropic/claude-sonnet-4-5"),
+            ("zai", "glm-5"),
+            ("opencode-go", "opencode-go/glm-5"),
         ])
     });
 
@@ -56,6 +59,9 @@ pub struct AgentConfig {
     pub openrouter_base_url: String,
     pub cerebras_base_url: String,
     pub ollama_base_url: String,
+    pub kilo_base_url: String,
+    pub zai_base_url: String,
+    pub opencodego_base_url: String,
     pub exa_base_url: String,
 
     // API keys
@@ -64,6 +70,9 @@ pub struct AgentConfig {
     pub anthropic_api_key: Option<String>,
     pub openrouter_api_key: Option<String>,
     pub cerebras_api_key: Option<String>,
+    pub kilo_api_key: Option<String>,
+    pub zai_api_key: Option<String>,
+    pub opencodego_api_key: Option<String>,
     pub exa_api_key: Option<String>,
     pub voyage_api_key: Option<String>,
 
@@ -101,12 +110,18 @@ impl Default for AgentConfig {
             openrouter_base_url: "https://openrouter.ai/api/v1".into(),
             cerebras_base_url: "https://api.cerebras.ai/v1".into(),
             ollama_base_url: "http://localhost:11434/v1".into(),
+            kilo_base_url: "https://api.kilo.ai/api/gateway".into(),
+            zai_base_url: "https://api.z.ai/api/coding/paas/v4".into(),
+            opencodego_base_url: "https://opencode.ai/zen/go/v1".into(),
             exa_base_url: "https://api.exa.ai".into(),
             api_key: None,
             openai_api_key: None,
             anthropic_api_key: None,
             openrouter_api_key: None,
             cerebras_api_key: None,
+            kilo_api_key: None,
+            zai_api_key: None,
+            opencodego_api_key: None,
             exa_api_key: None,
             voyage_api_key: None,
             max_depth: 4,
@@ -147,6 +162,15 @@ impl AgentConfig {
 
         let cerebras_api_key = env_opt("OPENPLANTER_CEREBRAS_API_KEY")
             .or_else(|| env_opt("CEREBRAS_API_KEY"));
+
+        let kilo_api_key = env_opt("OPENPLANTER_KILO_API_KEY")
+            .or_else(|| env_opt("KILO_API_KEY"));
+
+        let zai_api_key = env_opt("OPENPLANTER_ZAI_API_KEY")
+            .or_else(|| env_opt("ZAI_API_KEY"));
+
+        let opencodego_api_key = env_opt("OPENPLANTER_OPENCODEGO_API_KEY")
+            .or_else(|| env_opt("OPENCODEGO_API_KEY"));
 
         let exa_api_key = env_opt("OPENPLANTER_EXA_API_KEY")
             .or_else(|| env_opt("EXA_API_KEY"));
@@ -200,11 +224,26 @@ impl AgentConfig {
                 "OPENPLANTER_OLLAMA_BASE_URL",
                 "http://localhost:11434/v1",
             ),
+            kilo_base_url: env_or(
+                "OPENPLANTER_KILO_BASE_URL",
+                "https://api.kilo.ai/api/gateway",
+            ),
+            zai_base_url: env_or(
+                "OPENPLANTER_ZAI_BASE_URL",
+                "https://api.z.ai/api/coding/paas/v4",
+            ),
+            opencodego_base_url: env_or(
+                "OPENPLANTER_OPENCODEGO_BASE_URL",
+                "https://opencode.ai/zen/go/v1",
+            ),
             exa_base_url: env_or("OPENPLANTER_EXA_BASE_URL", "https://api.exa.ai"),
             openai_api_key,
             anthropic_api_key,
             openrouter_api_key,
             cerebras_api_key,
+            kilo_api_key,
+            zai_api_key,
+            opencodego_api_key,
             exa_api_key,
             voyage_api_key,
             max_depth: env_int("OPENPLANTER_MAX_DEPTH", 4),
@@ -284,6 +323,15 @@ mod tests {
             Some(&"qwen-3-235b-a22b-instruct-2507")
         );
         assert_eq!(PROVIDER_DEFAULT_MODELS.get("ollama"), Some(&"llama3.2"));
+        assert_eq!(
+            PROVIDER_DEFAULT_MODELS.get("kilo"),
+            Some(&"anthropic/claude-sonnet-4-5")
+        );
+        assert_eq!(PROVIDER_DEFAULT_MODELS.get("zai"), Some(&"glm-5"));
+        assert_eq!(
+            PROVIDER_DEFAULT_MODELS.get("opencode-go"),
+            Some(&"opencode-go/glm-5")
+        );
     }
 
     /// Combined env-based test to avoid race conditions from parallel test execution.

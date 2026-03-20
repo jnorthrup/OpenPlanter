@@ -617,6 +617,30 @@ def list_ollama_models(
     return _sorted_models(rows)
 
 
+def list_kilo_models(
+    api_key: str,
+    base_url: str = "https://api.kilo.ai/api/gateway",
+    timeout_sec: int = 60,
+) -> list[dict[str, Any]]:
+    return list_openai_models(api_key=api_key, base_url=base_url, timeout_sec=timeout_sec)
+
+
+def list_zai_models(
+    api_key: str,
+    base_url: str = "https://api.z.ai/api/coding/paas/v4",
+    timeout_sec: int = 60,
+) -> list[dict[str, Any]]:
+    return list_openai_models(api_key=api_key, base_url=base_url, timeout_sec=timeout_sec)
+
+
+def list_opencode_models(
+    api_key: str,
+    base_url: str = "https://opencode.ai/zen/go/v1",
+    timeout_sec: int = 60,
+) -> list[dict[str, Any]]:
+    return list_openai_models(api_key=api_key, base_url=base_url, timeout_sec=timeout_sec)
+
+
 # ---------------------------------------------------------------------------
 # OpenAI-compatible model (native tool calling)
 # ---------------------------------------------------------------------------

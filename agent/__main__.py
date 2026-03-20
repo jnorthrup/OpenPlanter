@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--provider",
         default=None,
-        choices=["auto", "openai", "anthropic", "openrouter", "cerebras", "ollama", "all"],
+        choices=["auto", "openai", "anthropic", "openrouter", "cerebras", "ollama", "kilo", "zai", "opencode-go", "all"],
         help="Model provider. Use 'all' only with --list-models.",
     )
     parser.add_argument("--model", help="Model name (use 'newest' to auto-select latest from API).")
@@ -153,7 +153,7 @@ def _format_ts(ts: int) -> str:
 
 def _resolve_provider(requested: str, creds: CredentialBundle) -> str:
     requested = requested.strip().lower()
-    if requested in {"openai", "anthropic", "openrouter", "cerebras", "ollama"}:
+    if requested in {"openai", "anthropic", "openrouter", "cerebras", "ollama", "kilo", "zai", "opencode-go"}:
         return requested
     if requested == "all":
         return "all"
@@ -165,15 +165,21 @@ def _resolve_provider(requested: str, creds: CredentialBundle) -> str:
         return "openrouter"
     if creds.cerebras_api_key:
         return "cerebras"
+    if creds.kilo_api_key:
+        return "kilo"
+    if creds.zai_api_key:
+        return "zai"
+    if creds.opencodego_api_key:
+        return "opencode-go"
     return "openai"
 
 
 def _print_models(cfg: AgentConfig, requested_provider: str) -> int:
     providers: list[str]
     if requested_provider == "all":
-        providers = ["openai", "anthropic", "openrouter", "cerebras", "ollama"]
+        providers = ["openai", "anthropic", "openrouter", "cerebras", "ollama", "kilo", "zai", "opencode-go"]
     elif requested_provider == "auto":
-        providers = ["openai", "anthropic", "openrouter", "cerebras", "ollama"]
+        providers = ["openai", "anthropic", "openrouter", "cerebras", "ollama", "kilo", "zai", "opencode-go"]
     else:
         providers = [requested_provider]
 

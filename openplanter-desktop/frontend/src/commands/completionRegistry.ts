@@ -14,6 +14,9 @@ const PROVIDER_FILTERS: CompletionItem[] = [
   { value: "ollama", description: "Local Ollama models" },
   { value: "cerebras", description: "Cerebras models" },
   { value: "openrouter", description: "OpenRouter models" },
+  { value: "kilo", description: "Kilo AI Gateway models" },
+  { value: "zai", description: "Z.ai GLM models" },
+  { value: "opencode-go", description: "OpenCode Go models" },
 ];
 
 const SAVE_FLAG: CompletionItem[] = [
