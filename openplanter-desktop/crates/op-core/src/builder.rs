@@ -1,82 +1,20 @@
 /// Engine construction and provider inference.
 ///
-/// Mirrors `agent/builder.py` — regex-based provider detection,
-/// model validation, and engine factory.
+/// Mirrors `agent/builder.py` — provider detection, model validation,
+/// and engine factory. All provider metadata comes from the registry.
 use std::collections::HashMap;
-
-use regex::Regex;
-use std::sync::LazyLock;
 
 use crate::config::{AgentConfig, PROVIDER_DEFAULT_MODELS};
 use crate::model::BaseModel;
 use crate::model::openai::OpenAIModel;
 use crate::model::anthropic::AnthropicModel;
+use crate::providers::{self, infer_provider_for_model, get_provider, all_model_providers};
 
 /// Error type for model/builder operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
     #[error("{0}")]
     Message(String),
-}
-
-// Provider inference regexes — order matters (Cerebras `qwen-3` before Ollama `qwen`).
-static ANTHROPIC_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^claude").unwrap());
-
-static OPENAI_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(gpt|o[1-4]-|o[1-4]$|chatgpt|dall-e|tts-|whisper)").unwrap());
-
-static CEREBRAS_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(llama.*cerebras|qwen-3|gpt-oss|zai-glm)").unwrap());
-
-// Ollama regex: `qwen` without lookahead — Cerebras check runs first, so
-// `qwen-3*` is already caught before we reach this regex.
-static OLLAMA_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)^(llama|mistral|gemma|phi|codellama|deepseek|vicuna|tinyllama|neural-chat|dolphin|wizardlm|orca|nous-hermes|command-r|qwen)",
-    )
-    .unwrap()
-});
-
-// Kilo prefix regex — disambiguates kilo.ai models from openrouter slash models.
-static KILO_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^kilo-").unwrap());
-
-// OpenCode Go prefix regex — must be checked before slash inference.
-static OPENCODEGO_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^opencode-go/").unwrap());
-
-// Z.ai GLM prefix regex — must be checked before slash inference.
-static ZAI_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^glm-").unwrap());
-
-/// Infer the likely provider for a model name, or `None` if ambiguous.
-pub fn infer_provider_for_model(model: &str) -> Option<&'static str> {
-    if OPENCODEGO_RE.is_match(model) {
-        return Some("opencode-go");
-    }
-    if KILO_RE.is_match(model) {
-        return Some("kilo");
-    }
-    if ZAI_RE.is_match(model) {
-        return Some("zai");
-    }
-    if model.contains('/') {
-        return Some("openrouter");
-    }
-    if ANTHROPIC_RE.is_match(model) {
-        return Some("anthropic");
-    }
-    if CEREBRAS_RE.is_match(model) {
-        return Some("cerebras");
-    }
-    if OPENAI_RE.is_match(model) {
-        return Some("openai");
-    }
-    if OLLAMA_RE.is_match(model) {
-        return Some("ollama");
-    }
-    None
 }
 
 /// Validate that a model name is compatible with the given provider.
@@ -102,14 +40,6 @@ pub fn resolve_model_name(cfg: &AgentConfig) -> Result<String, ModelError> {
     if !selected.is_empty() && selected.to_lowercase() != "newest" {
         return Ok(selected.to_string());
     }
-    if selected.to_lowercase() == "newest" {
-        // In the full implementation this would call list_models for the provider.
-        // For now, fall through to defaults.
-        return Ok(PROVIDER_DEFAULT_MODELS
-            .get(cfg.provider.as_str())
-            .unwrap_or(&"claude-opus-4-6")
-            .to_string());
-    }
     Ok(PROVIDER_DEFAULT_MODELS
         .get(cfg.provider.as_str())
         .unwrap_or(&"claude-opus-4-6")
@@ -132,21 +62,34 @@ pub fn resolve_provider(cfg: &AgentConfig) -> Result<String, ModelError> {
         }
     }
 
-    // Fallback: first provider with an available key
-    let candidates: &[(&str, &Option<String>)] = &[
-        ("anthropic", &cfg.anthropic_api_key),
-        ("openai", &cfg.openai_api_key),
-        ("openrouter", &cfg.openrouter_api_key),
-        ("cerebras", &cfg.cerebras_api_key),
-        ("kilo", &cfg.kilo_api_key),
-        ("zai", &cfg.zai_api_key),
-        ("opencode-go", &cfg.opencodego_api_key),
-        ("ollama", &None), // ollama is always last — no key needed
-    ];
-
-    for (name, key) in candidates {
-        if key.is_some() {
-            return Ok(name.to_string());
+    // Fallback: first provider with an available key, in inference-priority order
+    let ordered = providers::provider_names();
+    for name in ordered {
+        if name == "ollama" {
+            continue; // ollama is last (no key needed)
+        }
+        if let Some(provider) = get_provider(name) {
+            for env_var in provider.api_key_env {
+                if let Ok(val) = std::env::var(env_var) {
+                    if !val.trim().is_empty() {
+                        return Ok(name.to_string());
+                    }
+                }
+            }
+            // Also check config-level API key fields
+            let has_key = match name {
+                "openai" => cfg.openai_api_key.is_some(),
+                "anthropic" => cfg.anthropic_api_key.is_some(),
+                "openrouter" => cfg.openrouter_api_key.is_some(),
+                "cerebras" => cfg.cerebras_api_key.is_some(),
+                "kilo" => cfg.kilo_api_key.is_some(),
+                "zai" => cfg.zai_api_key.is_some(),
+                "opencode-go" => cfg.opencodego_api_key.is_some(),
+                _ => false,
+            };
+            if has_key {
+                return Ok(name.to_string());
+            }
         }
     }
 
@@ -155,110 +98,57 @@ pub fn resolve_provider(cfg: &AgentConfig) -> Result<String, ModelError> {
 }
 
 /// Resolve the base URL and API key for the given provider.
+///
+/// Uses the registry for default URL and env var names, with config overrides.
 pub fn resolve_endpoint(
     cfg: &AgentConfig,
     provider: &str,
 ) -> Result<(String, String), ModelError> {
-    match provider {
-        "anthropic" => {
-            let key = cfg
-                .anthropic_api_key
-                .as_deref()
-                .or(cfg.api_key.as_deref())
-                .filter(|k| !k.is_empty())
-                .ok_or_else(|| {
-                    ModelError::Message(
-                        "No Anthropic API key. Set ANTHROPIC_API_KEY or OPENPLANTER_ANTHROPIC_API_KEY.".into(),
-                    )
-                })?;
-            // Anthropic base URL does NOT include /v1 suffix for /messages endpoint —
-            // the model adapter appends /messages itself. The config stores it with /v1.
-            Ok((cfg.anthropic_base_url.clone(), key.to_string()))
+    let p = get_provider(provider)
+        .ok_or_else(|| ModelError::Message(format!("Unknown provider: {provider}")))?;
+
+    // Resolve API key: config field first, then env, then registry env vars
+    let key = match provider {
+        "openai" => cfg.openai_api_key.clone().or(cfg.api_key.clone()),
+        "anthropic" => cfg.anthropic_api_key.clone().or(cfg.api_key.clone()),
+        "openrouter" => cfg.openrouter_api_key.clone().or(cfg.api_key.clone()),
+        "cerebras" => cfg.cerebras_api_key.clone().or(cfg.api_key.clone()),
+        "kilo" => cfg.kilo_api_key.clone().or(cfg.api_key.clone()),
+        "zai" => cfg.zai_api_key.clone().or(cfg.api_key.clone()),
+        "opencode-go" => cfg.opencodego_api_key.clone().or(cfg.api_key.clone()),
+        "ollama" => Some("ollama".to_string()), // no key needed
+        _ => cfg.api_key.clone(),
+    };
+
+    let key = key.filter(|k| !k.is_empty()).or_else(|| {
+        providers::resolve_api_key_from_env(provider)
+    });
+
+    let key = key.ok_or_else(|| {
+        let env_names = p.api_key_env.join(" or ");
+        if env_names.is_empty() {
+            ModelError::Message(format!("No API key for provider '{provider}'."))
+        } else {
+            ModelError::Message(format!(
+                "No {provider} API key. Set {env_names}."
+            ))
         }
-        "openai" => {
-            let key = cfg
-                .openai_api_key
-                .as_deref()
-                .or(cfg.api_key.as_deref())
-                .filter(|k| !k.is_empty())
-                .ok_or_else(|| {
-                    ModelError::Message(
-                        "No OpenAI API key. Set OPENAI_API_KEY or OPENPLANTER_OPENAI_API_KEY.".into(),
-                    )
-                })?;
-            Ok((cfg.openai_base_url.clone(), key.to_string()))
-        }
-        "openrouter" => {
-            let key = cfg
-                .openrouter_api_key
-                .as_deref()
-                .or(cfg.api_key.as_deref())
-                .filter(|k| !k.is_empty())
-                .ok_or_else(|| {
-                    ModelError::Message(
-                        "No OpenRouter API key. Set OPENROUTER_API_KEY or OPENPLANTER_OPENROUTER_API_KEY.".into(),
-                    )
-                })?;
-            Ok((cfg.openrouter_base_url.clone(), key.to_string()))
-        }
-        "cerebras" => {
-            let key = cfg
-                .cerebras_api_key
-                .as_deref()
-                .or(cfg.api_key.as_deref())
-                .filter(|k| !k.is_empty())
-                .ok_or_else(|| {
-                    ModelError::Message(
-                        "No Cerebras API key. Set CEREBRAS_API_KEY or OPENPLANTER_CEREBRAS_API_KEY.".into(),
-                    )
-                })?;
-            Ok((cfg.cerebras_base_url.clone(), key.to_string()))
-        }
-        "ollama" => {
-            // Ollama doesn't need a real key — use a dummy
-            Ok((cfg.ollama_base_url.clone(), "ollama".to_string()))
-        }
-        "kilo" => {
-            let key = cfg
-                .kilo_api_key
-                .as_deref()
-                .or(cfg.api_key.as_deref())
-                .filter(|k| !k.is_empty())
-                .ok_or_else(|| {
-                    ModelError::Message(
-                        "No Kilo API key. Set KILO_API_KEY or OPENPLANTER_KILO_API_KEY.".into(),
-                    )
-                })?;
-            Ok((cfg.kilo_base_url.clone(), key.to_string()))
-        }
-        "zai" => {
-            let key = cfg
-                .zai_api_key
-                .as_deref()
-                .or(cfg.api_key.as_deref())
-                .filter(|k| !k.is_empty())
-                .ok_or_else(|| {
-                    ModelError::Message(
-                        "No Z.ai API key. Set ZAI_API_KEY or OPENPLANTER_ZAI_API_KEY.".into(),
-                    )
-                })?;
-            Ok((cfg.zai_base_url.clone(), key.to_string()))
-        }
-        "opencode-go" => {
-            let key = cfg
-                .opencodego_api_key
-                .as_deref()
-                .or(cfg.api_key.as_deref())
-                .filter(|k| !k.is_empty())
-                .ok_or_else(|| {
-                    ModelError::Message(
-                        "No OpenCode Go API key. Set OPENCODEGO_API_KEY or OPENPLANTER_OPENCODEGO_API_KEY.".into(),
-                    )
-                })?;
-            Ok((cfg.opencodego_base_url.clone(), key.to_string()))
-        }
-        _ => Err(ModelError::Message(format!("Unknown provider: {provider}"))),
-    }
+    })?;
+
+    // Resolve base URL: config field first, then registry default
+    let base_url = match provider {
+        "openai" => cfg.openai_base_url.clone(),
+        "anthropic" => cfg.anthropic_base_url.clone(),
+        "openrouter" => cfg.openrouter_base_url.clone(),
+        "cerebras" => cfg.cerebras_base_url.clone(),
+        "kilo" => cfg.kilo_base_url.clone(),
+        "zai" => cfg.zai_base_url.clone(),
+        "opencode-go" => cfg.opencodego_base_url.clone(),
+        "ollama" => cfg.ollama_base_url.clone(),
+        _ => p.default_base_url.to_string(),
+    };
+
+    Ok((base_url, key))
 }
 
 /// Build a model instance from the agent configuration.
@@ -276,7 +166,7 @@ pub fn build_model(cfg: &AgentConfig) -> Result<Box<dyn BaseModel>, ModelError> 
             cfg.reasoning_effort.clone(),
         ))),
         _ => {
-            // OpenAI-compatible: openai, openrouter, cerebras, ollama
+            // OpenAI-compatible: openai, openrouter, cerebras, ollama, kilo, zai, opencode-go
             let mut extra_headers = HashMap::new();
             if provider == "openrouter" {
                 extra_headers.insert(
@@ -303,18 +193,9 @@ mod tests {
 
     #[test]
     fn test_infer_anthropic() {
-        assert_eq!(
-            infer_provider_for_model("claude-opus-4-6"),
-            Some("anthropic")
-        );
-        assert_eq!(
-            infer_provider_for_model("claude-sonnet-4-5"),
-            Some("anthropic")
-        );
-        assert_eq!(
-            infer_provider_for_model("claude-haiku-4-5"),
-            Some("anthropic")
-        );
+        assert_eq!(infer_provider_for_model("claude-opus-4-6"), Some("anthropic"));
+        assert_eq!(infer_provider_for_model("claude-sonnet-4-5"), Some("anthropic"));
+        assert_eq!(infer_provider_for_model("claude-haiku-4-5"), Some("anthropic"));
     }
 
     #[test]
@@ -327,22 +208,13 @@ mod tests {
 
     #[test]
     fn test_infer_openrouter() {
-        assert_eq!(
-            infer_provider_for_model("anthropic/claude-sonnet-4-5"),
-            Some("openrouter")
-        );
-        assert_eq!(
-            infer_provider_for_model("openai/gpt-5.2"),
-            Some("openrouter")
-        );
+        assert_eq!(infer_provider_for_model("anthropic/claude-sonnet-4-5"), Some("openrouter"));
+        assert_eq!(infer_provider_for_model("openai/gpt-5.2"), Some("openrouter"));
     }
 
     #[test]
     fn test_infer_cerebras() {
-        assert_eq!(
-            infer_provider_for_model("qwen-3-235b-a22b-instruct-2507"),
-            Some("cerebras")
-        );
+        assert_eq!(infer_provider_for_model("qwen-3-235b"), Some("cerebras"));
     }
 
     #[test]
@@ -351,15 +223,32 @@ mod tests {
         assert_eq!(infer_provider_for_model("mistral"), Some("ollama"));
         assert_eq!(infer_provider_for_model("phi"), Some("ollama"));
         assert_eq!(infer_provider_for_model("deepseek"), Some("ollama"));
-        // qwen without -3 should be ollama
         assert_eq!(infer_provider_for_model("qwen2"), Some("ollama"));
     }
 
     #[test]
     fn test_cerebras_before_ollama_qwen() {
-        // qwen-3 → cerebras, qwen (no -3) → ollama
         assert_eq!(infer_provider_for_model("qwen-3"), Some("cerebras"));
         assert_eq!(infer_provider_for_model("qwen2"), Some("ollama"));
+    }
+
+    #[test]
+    fn test_infer_kilo() {
+        assert_eq!(infer_provider_for_model("kilo-auto/frontier"), Some("kilo"));
+        assert_eq!(infer_provider_for_model("kilo-auto/balanced"), Some("kilo"));
+    }
+
+    #[test]
+    fn test_infer_zai() {
+        assert_eq!(infer_provider_for_model("glm-5"), Some("zai"));
+        assert_eq!(infer_provider_for_model("glm-4.7"), Some("zai"));
+        assert_eq!(infer_provider_for_model("glm-4.5-air"), Some("zai"));
+    }
+
+    #[test]
+    fn test_infer_opencode_go() {
+        assert_eq!(infer_provider_for_model("opencode-go/glm-5"), Some("opencode-go"));
+        assert_eq!(infer_provider_for_model("opencode-go/kimi-k2.5"), Some("opencode-go"));
     }
 
     #[test]
@@ -371,10 +260,10 @@ mod tests {
     fn test_validate_model_provider_ok() {
         assert!(validate_model_provider("gpt-5.2", "openai").is_ok());
         assert!(validate_model_provider("claude-opus-4-6", "anthropic").is_ok());
-        // OpenRouter accepts anything
-        assert!(validate_model_provider("gpt-5.2", "openrouter").is_ok());
-        // Unknown model is accepted
-        assert!(validate_model_provider("some-model", "openai").is_ok());
+        assert!(validate_model_provider("anthropic/claude-sonnet-4-5", "openrouter").is_ok());
+        assert!(validate_model_provider("kilo-auto/balanced", "kilo").is_ok());
+        assert!(validate_model_provider("glm-5", "zai").is_ok());
+        assert!(validate_model_provider("opencode-go/glm-5", "opencode-go").is_ok());
     }
 
     #[test]
@@ -406,8 +295,6 @@ mod tests {
         assert_eq!(resolve_model_name(&cfg).unwrap(), "gpt-5.2");
     }
 
-    // ── resolve_provider ──
-
     #[test]
     fn test_resolve_provider_explicit() {
         let cfg = AgentConfig {
@@ -435,7 +322,6 @@ mod tests {
             openai_api_key: Some("sk-test".into()),
             ..Default::default()
         };
-        // anthropic checked first but no key, openai has key
         assert_eq!(resolve_provider(&cfg).unwrap(), "openai");
     }
 
@@ -460,8 +346,6 @@ mod tests {
         };
         assert_eq!(resolve_provider(&cfg).unwrap(), "anthropic");
     }
-
-    // ── resolve_endpoint ──
 
     #[test]
     fn test_resolve_endpoint_anthropic() {
@@ -489,7 +373,7 @@ mod tests {
         let cfg = AgentConfig::default();
         let result = resolve_endpoint(&cfg, "anthropic");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Anthropic API key"));
+        assert!(result.unwrap_err().to_string().contains("ANTHROPIC_API_KEY"));
     }
 
     #[test]
@@ -501,6 +385,39 @@ mod tests {
         let (url, key) = resolve_endpoint(&cfg, "openai").unwrap();
         assert_eq!(url, "https://api.openai.com/v1");
         assert_eq!(key, "sk-openai");
+    }
+
+    #[test]
+    fn test_resolve_endpoint_kilo() {
+        let cfg = AgentConfig {
+            kilo_api_key: Some("kilo-key".into()),
+            ..Default::default()
+        };
+        let (url, key) = resolve_endpoint(&cfg, "kilo").unwrap();
+        assert_eq!(url, "https://api.kilo.ai/api/gateway");
+        assert_eq!(key, "kilo-key");
+    }
+
+    #[test]
+    fn test_resolve_endpoint_zai() {
+        let cfg = AgentConfig {
+            zai_api_key: Some("zai-key".into()),
+            ..Default::default()
+        };
+        let (url, key) = resolve_endpoint(&cfg, "zai").unwrap();
+        assert_eq!(url, "https://api.z.ai/api/coding/paas/v4");
+        assert_eq!(key, "zai-key");
+    }
+
+    #[test]
+    fn test_resolve_endpoint_opencode_go() {
+        let cfg = AgentConfig {
+            opencodego_api_key: Some("ocgo-key".into()),
+            ..Default::default()
+        };
+        let (url, key) = resolve_endpoint(&cfg, "opencode-go").unwrap();
+        assert_eq!(url, "https://opencode.ai/zen/go/v1");
+        assert_eq!(key, "ocgo-key");
     }
 
     #[test]
@@ -518,8 +435,6 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Unknown provider"));
     }
-
-    // ── build_model ──
 
     #[test]
     fn test_build_model_anthropic() {
@@ -577,7 +492,6 @@ mod tests {
         let cfg = AgentConfig {
             provider: "openai".into(),
             model: "gpt-4o".into(),
-            // No key set
             ..Default::default()
         };
         let result = build_model(&cfg);

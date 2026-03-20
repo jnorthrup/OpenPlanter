@@ -4,6 +4,7 @@ use crate::state::AppState;
 use op_core::events::{ConfigView, ModelInfo, PartialConfig};
 use op_core::settings::{PersistentSettings, SettingsStore};
 use op_core::credentials::credentials_from_env;
+use op_core::providers::{self, get_provider, all_model_providers};
 
 /// Get the current configuration.
 #[tauri::command]
@@ -59,70 +60,19 @@ pub async fn update_config(
     })
 }
 
-/// Known models per provider for listing.
+/// Look up known models for a provider from the registry.
 fn known_models_for_provider(provider: &str) -> Vec<ModelInfo> {
-    let models: Vec<(&str, &str)> = match provider {
-        "openai" => vec![
-            ("gpt-5.2", "GPT-5.2"),
-            ("gpt-4o", "GPT-4o"),
-            ("gpt-4o-mini", "GPT-4o Mini"),
-            ("o1", "o1"),
-            ("o3", "o3"),
-            ("o4-mini", "o4-mini"),
-        ],
-        "anthropic" => vec![
-            ("claude-opus-4-6", "Claude Opus 4.6"),
-            ("claude-sonnet-4-5", "Claude Sonnet 4.5"),
-            ("claude-haiku-4-5", "Claude Haiku 4.5"),
-        ],
-        "openrouter" => vec![
-            ("anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5 (OR)"),
-            ("anthropic/claude-opus-4-6", "Claude Opus 4.6 (OR)"),
-            ("openai/gpt-5.2", "GPT-5.2 (OR)"),
-        ],
-        "cerebras" => vec![
-            ("qwen-3-235b-a22b-instruct-2507", "Qwen-3 235B"),
-            ("llama-4-scout-17b-16e-instruct", "Llama-4 Scout"),
-        ],
-        "ollama" => vec![
-            ("llama3.2", "Llama 3.2"),
-            ("mistral", "Mistral"),
-            ("gemma", "Gemma"),
-            ("phi", "Phi"),
-            ("deepseek", "DeepSeek"),
-            ("qwen2", "Qwen 2"),
-        ],
-        "kilo" => vec![
-            ("kilo-auto/frontier", "Kilo Auto (Frontier)"),
-            ("kilo-auto/balanced", "Kilo Auto (Balanced)"),
-            ("kilo-auto/fast", "Kilo Auto (Fast)"),
-            ("anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5 (Kilo)"),
-            ("anthropic/claude-opus-4-6", "Claude Opus 4.6 (Kilo)"),
-            ("openai/gpt-5.2", "GPT-5.2 (Kilo)"),
-        ],
-        "zai" => vec![
-            ("glm-5", "GLM-5"),
-            ("glm-4.7", "GLM-4.7"),
-            ("glm-4.6", "GLM-4.6"),
-            ("glm-4.5", "GLM-4.5"),
-            ("glm-4.5-air", "GLM-4.5 Air"),
-        ],
-        "opencode-go" => vec![
-            ("opencode-go/glm-5", "GLM-5 (OpenCode Go)"),
-            ("opencode-go/kimi-k2.5", "Kimi K2.5 (OpenCode Go)"),
-            ("opencode-go/minimax-m2.5", "MiniMax M2.5 (OpenCode Go)"),
-        ],
-        _ => vec![],
-    };
-
-    models
-        .into_iter()
-        .map(|(id, name)| ModelInfo {
-            id: id.to_string(),
-            name: Some(name.to_string()),
-            provider: provider.to_string(),
-        })
-        .collect()
+    match get_provider(provider) {
+        Some(p) => p.known_models
+            .iter()
+            .map(|m| ModelInfo {
+                id: m.id.to_string(),
+                name: Some(m.display_name.to_string()),
+                provider: provider.to_string(),
+            })
+            .collect(),
+        None => vec![],
+    }
 }
 
 /// List available models for a provider.
@@ -133,7 +83,7 @@ pub async fn list_models(
 ) -> Result<Vec<ModelInfo>, String> {
     if provider == "all" {
         let mut all = Vec::new();
-        for p in &["openai", "anthropic", "openrouter", "cerebras", "ollama", "kilo", "zai", "opencode-go"] {
+        for p in all_model_providers() {
             all.extend(known_models_for_provider(p));
         }
         Ok(all)
@@ -153,17 +103,28 @@ pub async fn save_settings(
     store.save(&settings).map_err(|e| e.to_string())
 }
 
+/// API key field accessor for AgentConfig by provider name.
+fn api_key_for_provider(cfg: &op_core::config::AgentConfig, provider: &str) -> bool {
+    match provider {
+        "openai" => cfg.openai_api_key.is_some(),
+        "anthropic" => cfg.anthropic_api_key.is_some(),
+        "openrouter" => cfg.openrouter_api_key.is_some(),
+        "cerebras" => cfg.cerebras_api_key.is_some(),
+        "ollama" => true, // never needs a key
+        "kilo" => cfg.kilo_api_key.is_some(),
+        "zai" => cfg.zai_api_key.is_some(),
+        "opencode-go" => cfg.opencodego_api_key.is_some(),
+        "exa" => cfg.exa_api_key.is_some(),
+        _ => false,
+    }
+}
+
 /// Build credential status from config: which providers/services have API keys configured.
 pub fn build_credential_status(cfg: &op_core::config::AgentConfig) -> HashMap<String, bool> {
     let mut status = HashMap::new();
-    status.insert("openai".to_string(), cfg.openai_api_key.is_some());
-    status.insert("anthropic".to_string(), cfg.anthropic_api_key.is_some());
-    status.insert("openrouter".to_string(), cfg.openrouter_api_key.is_some());
-    status.insert("cerebras".to_string(), cfg.cerebras_api_key.is_some());
-    status.insert("ollama".to_string(), true); // Ollama never needs a key
-    status.insert("kilo".to_string(), cfg.kilo_api_key.is_some());
-    status.insert("zai".to_string(), cfg.zai_api_key.is_some());
-    status.insert("opencode-go".to_string(), cfg.opencodego_api_key.is_some());
+    for name in all_model_providers() {
+        status.insert(name.to_string(), api_key_for_provider(cfg, name));
+    }
     status.insert("exa".to_string(), cfg.exa_api_key.is_some());
     status
 }
@@ -177,35 +138,21 @@ pub async fn get_credentials_status(
     let env_creds = credentials_from_env();
 
     let mut status = HashMap::new();
-    status.insert(
-        "openai".to_string(),
-        cfg.openai_api_key.is_some() || env_creds.openai_api_key.is_some(),
-    );
-    status.insert(
-        "anthropic".to_string(),
-        cfg.anthropic_api_key.is_some() || env_creds.anthropic_api_key.is_some(),
-    );
-    status.insert(
-        "openrouter".to_string(),
-        cfg.openrouter_api_key.is_some() || env_creds.openrouter_api_key.is_some(),
-    );
-    status.insert(
-        "cerebras".to_string(),
-        cfg.cerebras_api_key.is_some() || env_creds.cerebras_api_key.is_some(),
-    );
-    status.insert("ollama".to_string(), true); // Ollama never needs a key
-    status.insert(
-        "kilo".to_string(),
-        cfg.kilo_api_key.is_some() || env_creds.kilo_api_key.is_some(),
-    );
-    status.insert(
-        "zai".to_string(),
-        cfg.zai_api_key.is_some() || env_creds.zai_api_key.is_some(),
-    );
-    status.insert(
-        "opencode-go".to_string(),
-        cfg.opencodego_api_key.is_some() || env_creds.opencodego_api_key.is_some(),
-    );
+    for name in all_model_providers() {
+        let config_has = api_key_for_provider(&cfg, name);
+        let env_has = match name {
+            "openai" => env_creds.openai_api_key.is_some(),
+            "anthropic" => env_creds.anthropic_api_key.is_some(),
+            "openrouter" => env_creds.openrouter_api_key.is_some(),
+            "cerebras" => env_creds.cerebras_api_key.is_some(),
+            "ollama" => true,
+            "kilo" => env_creds.kilo_api_key.is_some(),
+            "zai" => env_creds.zai_api_key.is_some(),
+            "opencode-go" => env_creds.opencodego_api_key.is_some(),
+            _ => false,
+        };
+        status.insert(name.to_string(), config_has || env_has);
+    }
     status.insert(
         "exa".to_string(),
         cfg.exa_api_key.is_some() || env_creds.exa_api_key.is_some(),
@@ -277,7 +224,7 @@ mod tests {
     #[test]
     fn test_all_providers_model_ids_unique() {
         let mut all_ids = HashSet::new();
-        for p in &["openai", "anthropic", "openrouter", "cerebras", "ollama", "kilo", "zai", "opencode-go"] {
+        for p in all_model_providers() {
             for m in known_models_for_provider(p) {
                 assert!(
                     all_ids.insert(m.id.clone()),
@@ -290,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_model_info_fields() {
-        for provider in &["openai", "anthropic", "openrouter", "cerebras", "ollama", "kilo", "zai", "opencode-go"] {
+        for provider in all_model_providers() {
             for m in known_models_for_provider(provider) {
                 assert!(!m.id.is_empty(), "model id should not be empty");
                 assert!(m.name.is_some(), "model name should be Some for {}", m.id);
@@ -304,12 +251,14 @@ mod tests {
     #[test]
     fn test_cred_status_all_none() {
         let cfg = op_core::config::AgentConfig::from_env("/nonexistent");
-        // Force all keys to None
         let mut cfg = cfg;
         cfg.openai_api_key = None;
         cfg.anthropic_api_key = None;
         cfg.openrouter_api_key = None;
         cfg.cerebras_api_key = None;
+        cfg.kilo_api_key = None;
+        cfg.zai_api_key = None;
+        cfg.opencodego_api_key = None;
         let status = build_credential_status(&cfg);
         assert_eq!(status["openai"], false);
         assert_eq!(status["anthropic"], false);
@@ -360,7 +309,10 @@ mod tests {
         cfg.anthropic_api_key = Some("k2".to_string());
         cfg.openrouter_api_key = Some("k3".to_string());
         cfg.cerebras_api_key = Some("k4".to_string());
-        cfg.exa_api_key = Some("k5".to_string());
+        cfg.kilo_api_key = Some("k5".to_string());
+        cfg.zai_api_key = Some("k6".to_string());
+        cfg.opencodego_api_key = Some("k7".to_string());
+        cfg.exa_api_key = Some("k8".to_string());
         let status = build_credential_status(&cfg);
         for (provider, has_key) in &status {
             assert!(has_key, "{} should be true when key is set", provider);
@@ -368,9 +320,9 @@ mod tests {
     }
 
     #[test]
-    fn test_cred_status_has_six_entries() {
+    fn test_cred_status_has_nine_entries() {
         let cfg = op_core::config::AgentConfig::from_env("/nonexistent");
         let status = build_credential_status(&cfg);
-        assert_eq!(status.len(), 9, "should have 9 entries (8 providers + exa)");
+        assert_eq!(status.len(), 9, "should have 9 entries (8 model providers + exa)");
     }
 }
