@@ -1,40 +1,72 @@
 /** /model slash command handler. */
 import { updateConfig, listModels } from "../api/invoke";
 import { appState } from "../state/store";
+import catalog from "../data/providers.json";
+
+// ---------------------------------------------------------------------------
+// Types matching the shared JSON schema
+// ---------------------------------------------------------------------------
+
+interface InferRule {
+  match: string;
+}
+
+interface ProviderEntry {
+  id: string;
+  description: string;
+  defaultModel: string;
+  models: { id: string; name: string }[];
+  inferRules: InferRule[];
+}
+
+interface CatalogJson {
+  providers: ProviderEntry[];
+  aliases: Record<string, string>;
+}
+
+const typedCatalog = catalog as unknown as CatalogJson;
+
+// ---------------------------------------------------------------------------
+// Aliases — read from shared JSON
+// ---------------------------------------------------------------------------
 
 /** Aliases mapping short names to full model identifiers. */
-export const MODEL_ALIASES: Record<string, string> = {
-  opus: "claude-opus-4-6",
-  sonnet: "claude-sonnet-4-5",
-  haiku: "claude-haiku-4-5",
-  "sonnet-4": "claude-sonnet-4-5",
-  "haiku-4": "claude-haiku-4-5",
-  "opus-4": "claude-opus-4-6",
-  gpt5: "gpt-5.2",
-  "gpt-5": "gpt-5.2",
-  gpt4o: "gpt-4o",
-  "gpt-4o": "gpt-4o",
-  "o1": "o1",
-  "o3": "o3",
-  "o4-mini": "o4-mini",
-  llama: "llama3.2",
-  mistral: "mistral",
-  gemma: "gemma",
-  phi: "phi",
-  deepseek: "deepseek",
-  qwen: "qwen-3-235b-a22b-instruct-2507",
-  "qwen-3": "qwen-3-235b-a22b-instruct-2507",
-};
+export const MODEL_ALIASES: Record<string, string> = typedCatalog.aliases;
 
-/** Infer provider from a model name, matching builder.rs patterns. */
+// ---------------------------------------------------------------------------
+// Provider inference — driven by the shared JSON rules
+// ---------------------------------------------------------------------------
+
+function matchesRule(model: string, rule: InferRule): boolean {
+  const spec = rule.match;
+  if (spec.startsWith("contains:")) {
+    return model.includes(spec.slice("contains:".length));
+  }
+  if (spec.startsWith("prefix:")) {
+    return model.startsWith(spec.slice("prefix:".length));
+  }
+  if (spec.startsWith("exact:")) {
+    return model === spec.slice("exact:".length);
+  }
+  // Fallback: treat bare strings as prefix
+  return model.startsWith(spec);
+}
+
+/** Infer provider from a model name using the shared catalog rules. */
 export function inferProvider(model: string): string | null {
-  if (model.includes("/")) return "openrouter";
-  if (/^claude/i.test(model)) return "anthropic";
-  if (/^(llama.*cerebras|qwen-3|gpt-oss|zai-glm)/i.test(model)) return "cerebras";
-  if (/^(gpt|o[1-4]-|o[1-4]$|chatgpt|dall-e|tts-|whisper)/i.test(model)) return "openai";
-  if (/^(llama|mistral|gemma|phi|codellama|deepseek|vicuna|tinyllama|neural-chat|dolphin|wizardlm|orca|nous-hermes|command-r|qwen)/i.test(model)) return "ollama";
+  for (const provider of typedCatalog.providers) {
+    for (const rule of provider.inferRules) {
+      if (matchesRule(model, rule)) {
+        return provider.id;
+      }
+    }
+  }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Command handler
+// ---------------------------------------------------------------------------
 
 export interface CommandResult {
   action: "handled" | "clear" | "quit";

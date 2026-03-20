@@ -1,16 +1,14 @@
 /// Engine construction and provider inference.
 ///
-/// Mirrors `agent/builder.py` — regex-based provider detection,
+/// Mirrors `agent/builder.py` — provider detection via the shared catalog,
 /// model validation, and engine factory.
 use std::collections::HashMap;
 
-use regex::Regex;
-use std::sync::LazyLock;
-
-use crate::config::{AgentConfig, PROVIDER_DEFAULT_MODELS};
+use crate::config::AgentConfig;
 use crate::model::BaseModel;
 use crate::model::openai::OpenAIModel;
 use crate::model::anthropic::AnthropicModel;
+use crate::providers;
 
 /// Error type for model/builder operations.
 #[derive(Debug, thiserror::Error)]
@@ -19,43 +17,9 @@ pub enum ModelError {
     Message(String),
 }
 
-// Provider inference regexes — order matters (Cerebras `qwen-3` before Ollama `qwen`).
-static ANTHROPIC_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^claude").unwrap());
-
-static OPENAI_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(gpt|o[1-4]-|o[1-4]$|chatgpt|dall-e|tts-|whisper)").unwrap());
-
-static CEREBRAS_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(llama.*cerebras|qwen-3|gpt-oss|zai-glm)").unwrap());
-
-// Ollama regex: `qwen` without lookahead — Cerebras check runs first, so
-// `qwen-3*` is already caught before we reach this regex.
-static OLLAMA_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)^(llama|mistral|gemma|phi|codellama|deepseek|vicuna|tinyllama|neural-chat|dolphin|wizardlm|orca|nous-hermes|command-r|qwen)",
-    )
-    .unwrap()
-});
-
 /// Infer the likely provider for a model name, or `None` if ambiguous.
-pub fn infer_provider_for_model(model: &str) -> Option<&'static str> {
-    if model.contains('/') {
-        return Some("openrouter");
-    }
-    if ANTHROPIC_RE.is_match(model) {
-        return Some("anthropic");
-    }
-    if CEREBRAS_RE.is_match(model) {
-        return Some("cerebras");
-    }
-    if OPENAI_RE.is_match(model) {
-        return Some("openai");
-    }
-    if OLLAMA_RE.is_match(model) {
-        return Some("ollama");
-    }
-    None
+pub fn infer_provider_for_model(model: &str) -> Option<&str> {
+    providers::catalog().infer_provider(model)
 }
 
 /// Validate that a model name is compatible with the given provider.
@@ -81,17 +45,18 @@ pub fn resolve_model_name(cfg: &AgentConfig) -> Result<String, ModelError> {
     if !selected.is_empty() && selected.to_lowercase() != "newest" {
         return Ok(selected.to_string());
     }
+    let c = providers::catalog();
     if selected.to_lowercase() == "newest" {
         // In the full implementation this would call list_models for the provider.
         // For now, fall through to defaults.
-        return Ok(PROVIDER_DEFAULT_MODELS
-            .get(cfg.provider.as_str())
-            .unwrap_or(&"claude-opus-4-6")
+        return Ok(c
+            .default_model(&cfg.provider)
+            .unwrap_or("claude-opus-4-6")
             .to_string());
     }
-    Ok(PROVIDER_DEFAULT_MODELS
-        .get(cfg.provider.as_str())
-        .unwrap_or(&"claude-opus-4-6")
+    Ok(c
+        .default_model(&cfg.provider)
+        .unwrap_or("claude-opus-4-6")
         .to_string())
 }
 

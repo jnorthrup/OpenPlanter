@@ -1,21 +1,8 @@
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
-
-/// Default model for each supported provider.
-pub static PROVIDER_DEFAULT_MODELS: LazyLock<HashMap<&'static str, &'static str>> =
-    LazyLock::new(|| {
-        HashMap::from([
-            ("openai", "gpt-5.2"),
-            ("anthropic", "claude-opus-4-6"),
-            ("openrouter", "anthropic/claude-sonnet-4-5"),
-            ("cerebras", "qwen-3-235b-a22b-instruct-2507"),
-            ("ollama", "llama3.2"),
-        ])
-    });
 
 fn env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
@@ -270,20 +257,12 @@ mod tests {
 
     #[test]
     fn test_provider_default_models() {
-        assert_eq!(PROVIDER_DEFAULT_MODELS.get("openai"), Some(&"gpt-5.2"));
-        assert_eq!(
-            PROVIDER_DEFAULT_MODELS.get("anthropic"),
-            Some(&"claude-opus-4-6")
-        );
-        assert_eq!(
-            PROVIDER_DEFAULT_MODELS.get("openrouter"),
-            Some(&"anthropic/claude-sonnet-4-5")
-        );
-        assert_eq!(
-            PROVIDER_DEFAULT_MODELS.get("cerebras"),
-            Some(&"qwen-3-235b-a22b-instruct-2507")
-        );
-        assert_eq!(PROVIDER_DEFAULT_MODELS.get("ollama"), Some(&"llama3.2"));
+        let c = crate::providers::catalog();
+        assert_eq!(c.default_model("openai"), Some("gpt-5.2"));
+        assert_eq!(c.default_model("anthropic"), Some("claude-opus-4-6"));
+        assert_eq!(c.default_model("openrouter"), Some("anthropic/claude-sonnet-4-5"));
+        assert_eq!(c.default_model("cerebras"), Some("qwen-3-235b-a22b-instruct-2507"));
+        assert_eq!(c.default_model("ollama"), Some("llama3.2"));
     }
 
     /// Combined env-based test to avoid race conditions from parallel test execution.

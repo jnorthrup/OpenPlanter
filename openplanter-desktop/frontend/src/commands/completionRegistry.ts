@@ -1,5 +1,6 @@
 /** Completion tree for slash command autocomplete. */
 import { MODEL_ALIASES } from "./model";
+import catalog from "../data/providers.json";
 
 export interface CompletionItem {
   value: string;
@@ -7,13 +8,13 @@ export interface CompletionItem {
   children?: CompletionItem[];
 }
 
+// Build provider filters from the shared catalog JSON.
 const PROVIDER_FILTERS: CompletionItem[] = [
   { value: "all", description: "All providers" },
-  { value: "openai", description: "OpenAI models" },
-  { value: "anthropic", description: "Anthropic models" },
-  { value: "ollama", description: "Local Ollama models" },
-  { value: "cerebras", description: "Cerebras models" },
-  { value: "openrouter", description: "OpenRouter models" },
+  ...catalog.providers.map((p) => ({
+    value: p.id,
+    description: p.description,
+  })),
 ];
 
 const SAVE_FLAG: CompletionItem[] = [
