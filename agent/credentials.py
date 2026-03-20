@@ -158,18 +158,6 @@ def credentials_from_env() -> CredentialBundle:
             os.getenv("OPENPLANTER_CEREBRAS_API_KEY") or os.getenv("CEREBRAS_API_KEY") or ""
         ).strip()
         or None,
-        kilo_api_key=(
-            os.getenv("OPENPLANTER_KILO_API_KEY") or os.getenv("KILO_API_KEY") or ""
-        ).strip()
-        or None,
-        zai_api_key=(
-            os.getenv("OPENPLANTER_ZAI_API_KEY") or os.getenv("ZAI_API_KEY") or ""
-        ).strip()
-        or None,
-        opencodego_api_key=(
-            os.getenv("OPENPLANTER_OPENCODEGO_API_KEY") or os.getenv("OPENCODEGO_API_KEY") or ""
-        ).strip()
-        or None,
         exa_api_key=(os.getenv("OPENPLANTER_EXA_API_KEY") or os.getenv("EXA_API_KEY") or "").strip() or None,
         voyage_api_key=(os.getenv("OPENPLANTER_VOYAGE_API_KEY") or os.getenv("VOYAGE_API_KEY") or "").strip() or None,
     )
@@ -265,9 +253,6 @@ def prompt_for_credentials(
         anthropic_api_key=existing.anthropic_api_key,
         openrouter_api_key=existing.openrouter_api_key,
         cerebras_api_key=existing.cerebras_api_key,
-        kilo_api_key=existing.kilo_api_key,
-        zai_api_key=existing.zai_api_key,
-        opencodego_api_key=existing.opencodego_api_key,
         exa_api_key=existing.exa_api_key,
         voyage_api_key=existing.voyage_api_key,
     )
@@ -301,9 +286,6 @@ def prompt_for_credentials(
     current.anthropic_api_key = _ask("Anthropic", current.anthropic_api_key)
     current.openrouter_api_key = _ask("OpenRouter", current.openrouter_api_key)
     current.cerebras_api_key = _ask("Cerebras", current.cerebras_api_key)
-    current.kilo_api_key = _ask("Kilo", current.kilo_api_key)
-    current.zai_api_key = _ask("Z.ai", current.zai_api_key)
-    current.opencodego_api_key = _ask("OpenCode Go", current.opencodego_api_key)
     current.exa_api_key = _ask("Exa", current.exa_api_key)
     current.voyage_api_key = _ask("Voyage", current.voyage_api_key)
     if not force and current.has_any() and not existing.has_any():
